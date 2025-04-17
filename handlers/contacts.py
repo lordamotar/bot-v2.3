@@ -6,6 +6,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from keyboards.contacts_kb import get_main_menu, get_cities_keyboard, get_locations_keyboard
 from data.locations import get_location_info, get_cities
+from utils.logger import logger
 
 router = Router()
 
@@ -15,6 +16,7 @@ class ContactStates(StatesGroup):
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
+    logger.info(f"Пользователь {message.from_user.id} запустил бота")
     await message.answer(
         "Добро пожаловать! Выберите раздел:",
         reply_markup=get_main_menu()
@@ -22,6 +24,7 @@ async def cmd_start(message: Message):
 
 @router.message(F.text == "Контакты")
 async def contacts_menu(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} открыл раздел 'Контакты'")
     await state.set_state(ContactStates.select_city)
     await message.answer(
         "Выберите город:",
@@ -30,6 +33,7 @@ async def contacts_menu(message: Message, state: FSMContext):
 
 @router.message(ContactStates.select_city, F.text == "Назад")
 async def back_to_main(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} вернулся в главное меню")
     await state.clear()
     await message.answer(
         "Выберите раздел:",
@@ -39,10 +43,12 @@ async def back_to_main(message: Message, state: FSMContext):
 @router.message(ContactStates.select_city)
 async def select_city(message: Message, state: FSMContext):
     if message.text not in get_cities():
+        logger.warning(f"Пользователь {message.from_user.id} ввел несуществующий город: {message.text}")
         await message.answer("Пожалуйста, выберите город из списка.")
         return
         
     city = message.text
+    logger.info(f"Пользователь {message.from_user.id} выбрал город: {city}")
     await state.update_data(city=city)
     await state.set_state(ContactStates.select_location)
     await message.answer(
@@ -52,6 +58,7 @@ async def select_city(message: Message, state: FSMContext):
 
 @router.message(ContactStates.select_location, F.text == "Назад")
 async def back_to_cities(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} вернулся к выбору города")
     await state.set_state(ContactStates.select_city)
     await message.answer(
         "Выберите город:",
@@ -66,8 +73,11 @@ async def show_location_info(message: Message, state: FSMContext):
     
     location_info = get_location_info(city, location)
     if not location_info:
+        logger.warning(f"Пользователь {message.from_user.id} выбрал несуществующую точку: {location} в городе {city}")
         await message.answer("Торговая точка не найдена. Пожалуйста, выберите из списка.")
         return
+    
+    logger.info(f"Пользователь {message.from_user.id} запросил информацию о точке: {location} в городе {city}")
     
     # Создаем инлайн-кнопку для карты
     map_button = InlineKeyboardButton(
