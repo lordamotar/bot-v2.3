@@ -1,8 +1,20 @@
 import asyncio
-from bot import dp, bot
-from handlers.contacts import router
+import logging
+from aiogram import Bot, Dispatcher
+from config import BOT_TOKEN
+from handlers import contacts
+from database import Database
 from utils.logger import logger, setup_logger
 
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+
+# Инициализация бота и диспетчера
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+# Регистрация роутеров
+dp.include_router(contacts.router)
 
 async def shutdown(dispatcher: dp):
     logger.info("Начало процесса выключения бота...")
@@ -16,9 +28,9 @@ async def main():
     setup_logger()
     logger.info("Запуск бота...")
     
-    # Регистрация роутеров
-    dp.include_router(router)
-    logger.info("Роутеры успешно зарегистрированы")
+    # Инициализация базы данных
+    db = Database()
+    await db.init_db()
     
     try:
         # Запуск бота
@@ -30,6 +42,8 @@ async def main():
     except Exception as e:
         logger.error(f"Произошла ошибка: {e}", exc_info=True)
         await shutdown(dp)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
