@@ -88,6 +88,19 @@ async def start_chat(message: Message, state: FSMContext):
             )
             return
 
+        # Формируем текст кнопки для менеджера
+        user_info = []
+        if user['first_name']:
+            user_info.append(user['first_name'])
+        if user['last_name']:
+            user_info.append(user['last_name'])
+        if user['phone_number']:
+            user_info.append(user['phone_number'])
+        if not user_info:  # Если нет никакой информации
+            user_info.append(f"ID: {user['user_id']}")
+
+        button_text = f"Принять чат с {' '.join(user_info)}"
+
         # Отправляем уведомление менеджеру
         manager_message = (
             f"Новый запрос на чат!\n\n"
@@ -101,7 +114,10 @@ async def start_chat(message: Message, state: FSMContext):
         await bot.send_message(
             MANAGER_ID,
             manager_message,
-            reply_markup=get_manager_keyboard(chat_id)
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=button_text)]],
+                resize_keyboard=True
+            )
         )
 
         await state.set_state(ManagerStates.chat_message)
@@ -116,18 +132,21 @@ async def start_chat(message: Message, state: FSMContext):
             reply_markup=get_manager_contact_keyboard()
         )
 
-@router.message(F.text.startswith("Принять чат "))
+@router.message(F.text.startswith("Принять чат с "))
 async def accept_chat(message: Message, state: FSMContext):
     """Обработка принятия чата менеджером"""
     if message.from_user.id != MANAGER_ID:
         return
 
     try:
-        chat_id = int(message.text.split()[2])
-        chat = await db.get_chat_by_id(chat_id)
-        if not chat:
-            await message.answer("Чат не найден")
+        # Получаем последний ожидающий чат
+        pending_chats = await db.get_pending_chats()
+        if not pending_chats:
+            await message.answer("Нет ожидающих чатов")
             return
+
+        chat = pending_chats[0]  # Берем первый ожидающий чат
+        chat_id = chat['id']
 
         # Обновляем статус чата
         if not await db.update_chat_status(chat_id, "active"):
