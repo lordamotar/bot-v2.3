@@ -153,7 +153,19 @@ class Database:
                     manager_id INTEGER,
                     status TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    closed_at TIMESTAMP
+                    closed_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+            
+            # Создаем таблицу оценок чатов
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS chat_ratings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER,
+                    rating INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (chat_id) REFERENCES chats(id)
                 )
             """)
             
@@ -787,5 +799,49 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении логов: {e}")
             return []
+        finally:
+            await self.disconnect()
+
+    async def save_chat_rating(self, chat_id: int, rating: int) -> bool:
+        """Сохранение оценки чата"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                INSERT INTO chat_ratings (chat_id, rating)
+                VALUES (?, ?)
+                """,
+                (chat_id, rating)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении оценки чата: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def get_manager_rating(self, manager_id: int) -> float:
+        """Получение среднего рейтинга менеджера"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT AVG(r.rating) as avg_rating
+                FROM chat_ratings r
+                JOIN chats c ON r.chat_id = c.id
+                WHERE c.manager_id = ?
+                """,
+                (manager_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            
+            if row and row[0] is not None:
+                return round(float(row[0]), 2)
+            return 0.0
+        except Exception as e:
+            logger.error(f"Ошибка при получении рейтинга менеджера: {e}")
+            return 0.0
         finally:
             await self.disconnect() 

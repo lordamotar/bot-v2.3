@@ -15,12 +15,22 @@ class ManagerStates(StatesGroup):
     """Состояния для общения с менеджером"""
     waiting_for_manager = State()
     chat_message = State()
+    rating_chat = State()  # Новое состояние для оценки
 
 def get_manager_keyboard(chat_id: int) -> ReplyKeyboardMarkup:
     """Создание клавиатуры для менеджера"""
     keyboard = [
         [KeyboardButton(text=f"Принять чат {chat_id}")],
         [KeyboardButton(text="Отклонить")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+def get_rating_keyboard() -> ReplyKeyboardMarkup:
+    """Создание клавиатуры для оценки"""
+    keyboard = [
+        [KeyboardButton(text="⭐️"), KeyboardButton(text="⭐️⭐️")],
+        [KeyboardButton(text="⭐️⭐️⭐️"), KeyboardButton(text="⭐️⭐️⭐️⭐️")],
+        [KeyboardButton(text="⭐️⭐️⭐️⭐️⭐️")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -260,15 +270,21 @@ async def end_chat(message: Message, state: FSMContext):
                 f"Завершен чат с пользователем {chat['user_id']}"
             )
         else:
-            # Уведомляем менеджера и возвращаем на главную страницу
+            # Уведомляем менеджера
             await bot.send_message(
                 MANAGER_ID,
                 "Пользователь завершил чат.",
                 reply_markup=get_main_keyboard()
             )
+            
+            # Сохраняем ID чата в состоянии для оценки
+            await state.set_state(ManagerStates.rating_chat)
+            await state.update_data(chat_id=chat['id'])
+            
+            # Запрашиваем оценку у пользователя
             await message.answer(
-                "Чат завершен",
-                reply_markup=get_main_keyboard()
+                "Пожалуйста, оцените качество обслуживания:",
+                reply_markup=get_rating_keyboard()
             )
             # Логируем действие пользователя
             await db.save_user_log(
@@ -276,11 +292,56 @@ async def end_chat(message: Message, state: FSMContext):
                 "end_chat_user",
                 "Завершен чат с менеджером"
             )
-            # Очищаем состояние пользователя
-            await state.clear()
     except Exception as e:
         logger.error(f"Ошибка при завершении чата: {e}")
         await message.answer("Ошибка при обработке запроса")
+
+@router.message(ManagerStates.rating_chat)
+async def handle_rating(message: Message, state: FSMContext):
+    """Обработка оценки чата"""
+    try:
+        # Получаем количество звезд из сообщения
+        rating = len(message.text)
+        
+        # Получаем данные из состояния
+        data = await state.get_data()
+        chat_id = data.get('chat_id')
+        
+        if not chat_id:
+            await message.answer(
+                "Произошла ошибка. Попробуйте позже.",
+                reply_markup=get_main_keyboard()
+            )
+            await state.clear()
+            return
+            
+        # Сохраняем оценку в базе данных
+        if await db.save_chat_rating(chat_id, rating):
+            await message.answer(
+                f"Спасибо за вашу оценку! ({message.text})",
+                reply_markup=get_main_keyboard()
+            )
+            # Логируем действие
+            await db.save_user_log(
+                message.from_user.id,
+                "rate_chat",
+                f"Оценка чата: {rating} звезд"
+            )
+        else:
+            await message.answer(
+                "Произошла ошибка при сохранении оценки. Попробуйте позже.",
+                reply_markup=get_main_keyboard()
+            )
+        
+        # Очищаем состояние
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Ошибка при обработке оценки: {e}")
+        await message.answer(
+            "Произошла ошибка. Попробуйте позже.",
+            reply_markup=get_main_keyboard()
+        )
+        await state.clear()
 
 @router.message(F.text == "Отклонить")
 async def reject_chat(message: Message, state: FSMContext):
