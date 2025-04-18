@@ -77,10 +77,10 @@ class Database:
                         created_at, updated_at
                     FROM service_points
                 """)
-                
+
                 # Удаляем старую таблицу
                 await self.connection.execute("DROP TABLE service_points")
-                
+
                 # Переименовываем новую таблицу
                 await self.connection.execute(
                     "ALTER TABLE service_points_new RENAME TO service_points"
@@ -106,6 +106,18 @@ class Database:
                         UNIQUE(city, address)
                     )
                 """)
+            
+            # Создаем таблицу для продуктов
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    vehicle_type TEXT NOT NULL,
+                    subtype TEXT,
+                    size TEXT NOT NULL,
+                    link TEXT NOT NULL
+                )
+            """)
             
             await self.connection.commit()
             logger.info("База данных успешно инициализирована")
@@ -227,6 +239,134 @@ class Database:
             return True
         except Exception as e:
             logger.error(f"Ошибка при добавлении торговой точки: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    # Методы для работы с каталогом
+    async def get_vehicle_types(self, category: str) -> List[str]:
+        """Получение списка типов ТС для категории"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT DISTINCT vehicle_type FROM products 
+                WHERE category = ?
+                """,
+                (category,)
+            )
+            types = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
+            return types
+        except Exception as e:
+            logger.error(f"Ошибка при получении типов ТС: {e}")
+            return []
+        finally:
+            await self.disconnect()
+
+    async def get_subtypes(self, category: str, vehicle_type: str) -> List[str]:
+        """Получение списка подтипов для категории и типа ТС"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT DISTINCT subtype FROM products 
+                WHERE category = ? AND vehicle_type = ? AND subtype IS NOT NULL
+                """,
+                (category, vehicle_type)
+            )
+            subtypes = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
+            return subtypes
+        except Exception as e:
+            logger.error(f"Ошибка при получении подтипов: {e}")
+            return []
+        finally:
+            await self.disconnect()
+
+    async def get_sizes(
+        self, category: str, vehicle_type: str, subtype: Optional[str] = None
+    ) -> List[str]:
+        """Получение списка размеров"""
+        try:
+            await self.connect()
+            if subtype:
+                cursor = await self.connection.execute(
+                    """
+                    SELECT DISTINCT size FROM products 
+                    WHERE category = ? AND vehicle_type = ? AND subtype = ?
+                    """,
+                    (category, vehicle_type, subtype)
+                )
+            else:
+                cursor = await self.connection.execute(
+                    """
+                    SELECT DISTINCT size FROM products 
+                    WHERE category = ? AND vehicle_type = ?
+                    """,
+                    (category, vehicle_type)
+                )
+            sizes = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
+            return sizes
+        except Exception as e:
+            logger.error(f"Ошибка при получении размеров: {e}")
+            return []
+        finally:
+            await self.disconnect()
+
+    async def get_product_link(
+        self, category: str, vehicle_type: str, subtype: Optional[str],
+        size: str
+    ) -> Optional[str]:
+        """Получение ссылки на товар"""
+        try:
+            await self.connect()
+            if subtype:
+                cursor = await self.connection.execute(
+                    """
+                    SELECT link FROM products 
+                    WHERE category = ? AND vehicle_type = ? 
+                    AND subtype = ? AND size = ?
+                    """,
+                    (category, vehicle_type, subtype, size)
+                )
+            else:
+                cursor = await self.connection.execute(
+                    """
+                    SELECT link FROM products 
+                    WHERE category = ? AND vehicle_type = ? AND size = ?
+                    """,
+                    (category, vehicle_type, size)
+                )
+            row = await cursor.fetchone()
+            await cursor.close()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Ошибка при получении ссылки на товар: {e}")
+            return None
+        finally:
+            await self.disconnect()
+
+    async def add_product(self, data: Dict) -> bool:
+        """Добавление нового товара"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                INSERT INTO products (
+                    category, vehicle_type, subtype, size, link
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    data['category'], data['vehicle_type'],
+                    data.get('subtype'), data['size'], data['link']
+                )
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении товара: {e}")
             return False
         finally:
             await self.disconnect() 
