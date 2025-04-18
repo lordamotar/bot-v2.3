@@ -50,10 +50,44 @@ async def start_manager_contact(message: Message, state: FSMContext):
                 )
                 return
 
+        # Проверяем наличие активного чата
+        active_chat = await db.get_chat(message.from_user.id)
+        if active_chat:
+            if active_chat['status'] == 'active':
+                # Если есть активный чат, продолжаем общение
+                await state.set_state(ManagerStates.chat_message)
+                await message.answer(
+                    "У вас уже есть активный чат с менеджером. Продолжайте общение.",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[
+                            [KeyboardButton(text="Завершить чат")],
+                            [KeyboardButton(text="Назад")]
+                        ],
+                        resize_keyboard=True
+                    )
+                )
+                # Логируем действие
+                await db.save_user_log(
+                    message.from_user.id,
+                    "continue_chat",
+                    "Продолжение активного чата с менеджером"
+                )
+                return
+            elif active_chat['status'] == 'pending':
+                # Если есть ожидающий чат, отправляем новый запрос
+                await start_chat(message, state)
+                return
+
         await state.set_state(ManagerStates.waiting_for_manager)
         await message.answer(
             "Выберите способ связи с менеджером:",
             reply_markup=get_manager_contact_keyboard()
+        )
+        # Логируем действие
+        await db.save_user_log(
+            message.from_user.id,
+            "start_manager_contact",
+            "Начало процесса связи с менеджером"
         )
     except Exception as e:
         logger.error(f"Ошибка при начале связи с менеджером: {e}")
@@ -125,6 +159,12 @@ async def start_chat(message: Message, state: FSMContext):
             "Ваш запрос на чат отправлен менеджеру. Ожидайте подтверждения.",
             reply_markup=ReplyKeyboardRemove()
         )
+        # Логируем действие
+        await db.save_user_log(
+            message.from_user.id,
+            "start_chat",
+            f"Создан новый чат с ID: {chat_id}"
+        )
     except Exception as e:
         logger.error(f"Ошибка при начале чата: {e}")
         await message.answer(
@@ -184,7 +224,7 @@ async def accept_chat(message: Message, state: FSMContext):
         await message.answer("Ошибка при обработке запроса")
 
 @router.message(F.text == "Завершить чат")
-async def end_chat(message: Message):
+async def end_chat(message: Message, state: FSMContext):
     """Завершение чата"""
     try:
         # Получаем активный чат
@@ -213,6 +253,12 @@ async def end_chat(message: Message):
                 "Чат завершен",
                 reply_markup=get_main_keyboard()
             )
+            # Логируем действие менеджера
+            await db.save_user_log(
+                MANAGER_ID,
+                "end_chat_manager",
+                f"Завершен чат с пользователем {chat['user_id']}"
+            )
         else:
             # Уведомляем менеджера и возвращаем на главную страницу
             await bot.send_message(
@@ -224,6 +270,14 @@ async def end_chat(message: Message):
                 "Чат завершен",
                 reply_markup=get_main_keyboard()
             )
+            # Логируем действие пользователя
+            await db.save_user_log(
+                message.from_user.id,
+                "end_chat_user",
+                "Завершен чат с менеджером"
+            )
+            # Очищаем состояние пользователя
+            await state.clear()
     except Exception as e:
         logger.error(f"Ошибка при завершении чата: {e}")
         await message.answer("Ошибка при обработке запроса")
@@ -303,10 +357,11 @@ async def handle_chat_message(message: Message, state: FSMContext):
         # Сохраняем сообщение в истории
         await db.save_message(chat['id'], message.from_user.id, message.text)
         
-        # Обновляем клавиатуру клиента
-        await message.answer(
-            "Сообщение отправлено",
-            reply_markup=client_keyboard
+        # Логируем действие
+        await db.save_user_log(
+            message.from_user.id,
+            "send_message",
+            f"Отправлено сообщение в чат {chat['id']}: {message.text[:50]}..."
         )
         
     except Exception as e:

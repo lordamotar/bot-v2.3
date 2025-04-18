@@ -5,9 +5,9 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
+from handlers.manager import router as manager_router
 from handlers.contacts import router as contacts_router
 from handlers.catalog import router as catalog_router
-from handlers.manager import router as manager_router
 from keyboards.main_kb import get_main_keyboard
 from database import Database
 from utils.logger import logger, setup_logger
@@ -21,9 +21,9 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # Подключение роутеров
+dp.include_router(manager_router)
 dp.include_router(contacts_router)
 dp.include_router(catalog_router)
-dp.include_router(manager_router)
 
 # Обработчик команды /start
 @dp.message(Command("start"))
@@ -48,11 +48,11 @@ async def cmd_help(message: Message):
         reply_markup=get_main_keyboard()
     )
 
-async def shutdown(dispatcher: dp):
-    logger.info("Начало процесса выключения бота...")
-    await dispatcher.storage.close()
-    await dispatcher.bot.session.close()
-    logger.info("Бот успешно выключен")
+async def shutdown(bot: Bot):
+    """Корректное завершение работы бота"""
+    logger.info("Shutting down...")
+    await bot.session.close()
+    logger.info("Bot session closed")
 
 async def main():
     """Основная функция запуска бота"""
@@ -68,19 +68,15 @@ async def main():
         # Запуск бота
         logger.info("Бот запущен и готов к работе")
         await dp.start_polling(bot)
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Получен сигнал на выключение бота")
-        await shutdown(dp)
     except Exception as e:
-        logger.error(f"Произошла ошибка: {e}", exc_info=True)
-        await shutdown(dp)
+        logger.error(f"Error in main loop: {e}")
     finally:
-        await bot.session.close()
+        await shutdown(bot)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Программа завершена пользователем")
+        logger.info("Bot stopped!")
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}", exc_info=True) 

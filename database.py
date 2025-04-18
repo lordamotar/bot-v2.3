@@ -168,6 +168,18 @@ class Database:
                 )
             """)
             
+            # Создаем таблицу логов
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS user_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    action TEXT,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+            
             await self.connection.commit()
             logger.info("База данных успешно инициализирована")
         except Exception as e:
@@ -733,5 +745,47 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении активного чата менеджера: {e}")
             return None
+        finally:
+            await self.disconnect()
+
+    async def save_user_log(self, user_id: int, action: str, details: str = None) -> bool:
+        """Сохранение лога действия пользователя"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                '''
+                INSERT INTO user_logs (user_id, action, details)
+                VALUES (?, ?, ?)
+                ''',
+                (user_id, action, details)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении лога: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def get_user_logs(self, user_id: int, limit: int = 100) -> list:
+        """Получение логов пользователя"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                '''
+                SELECT action, details, created_at
+                FROM user_logs
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                ''',
+                user_id, limit
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Ошибка при получении логов: {e}")
+            return []
         finally:
             await self.disconnect() 
