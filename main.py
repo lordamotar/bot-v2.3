@@ -7,6 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from handlers.contacts import router as contacts_router
 from handlers.catalog import router as catalog_router
+from handlers.manager import router as manager_router
 from keyboards.main_kb import get_main_keyboard
 from database import Database
 from utils.logger import logger, setup_logger
@@ -22,6 +23,7 @@ dp = Dispatcher(storage=storage)
 # Подключение роутеров
 dp.include_router(contacts_router)
 dp.include_router(catalog_router)
+dp.include_router(manager_router)
 
 # Обработчик команды /start
 @dp.message(Command("start"))

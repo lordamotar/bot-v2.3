@@ -119,6 +119,55 @@ class Database:
                 )
             """)
             
+            # Создаем таблицу пользователей
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    first_name TEXT,
+                    last_name TEXT,
+                    username TEXT,
+                    phone_number TEXT,
+                    birth_date TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Создаем таблицу запросов на связь
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS contact_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    request_type TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+            
+            # Создаем таблицу чатов
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS chats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    manager_id INTEGER,
+                    status TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    closed_at TIMESTAMP
+                )
+            """)
+            
+            # Создаем таблицу сообщений
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER,
+                    sender_id INTEGER,
+                    message_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             await self.connection.commit()
             logger.info("База данных успешно инициализирована")
         except Exception as e:
@@ -368,5 +417,321 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при добавлении товара: {e}")
             return False
+        finally:
+            await self.disconnect()
+
+    async def get_user(self, user_id: int) -> Optional[Dict]:
+        """Получение информации о пользователе"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                "SELECT * FROM users WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            
+            if row:
+                columns = [description[0] for description in cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при получении пользователя: {e}")
+            return None
+        finally:
+            await self.disconnect()
+
+    async def save_user(self, user_data: Dict) -> bool:
+        """Сохранение информации о пользователе"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                INSERT OR REPLACE INTO users (
+                    user_id, first_name, last_name, username,
+                    phone_number, birth_date, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    user_data['user_id'],
+                    user_data.get('first_name'),
+                    user_data.get('last_name'),
+                    user_data.get('username'),
+                    user_data.get('phone_number'),
+                    user_data.get('birth_date')
+                )
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении пользователя: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def create_contact_request(self, user_id: int, request_type: str) -> bool:
+        """Создание запроса на связь с менеджером"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                INSERT INTO contact_requests (user_id, request_type)
+                VALUES (?, ?)
+                """,
+                (user_id, request_type)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при создании запроса: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def update_user(self, user_id: int, data: dict) -> bool:
+        """Обновление данных пользователя"""
+        try:
+            await self.connect()
+            # Формируем SQL запрос на основе переданных данных
+            set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+            query = f"""
+                UPDATE users 
+                SET {set_clause}, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """
+            values = list(data.values()) + [user_id]
+            
+            await self.connection.execute(query, values)
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении пользователя: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def create_chat(self, user_id: int, manager_id: int) -> int:
+        """Создание чата между пользователем и менеджером"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                INSERT INTO chats (user_id, manager_id, status)
+                VALUES (?, ?, 'pending')
+                """,
+                (user_id, manager_id)
+            )
+            chat_id = cursor.lastrowid
+            await self.connection.commit()
+            return chat_id
+        except Exception as e:
+            logger.error(f"Ошибка при создании чата: {e}")
+            return 0
+        finally:
+            await self.disconnect()
+
+    async def get_chat(self, user_id: int) -> Optional[Dict]:
+        """Получение информации о чате по ID пользователя"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT * FROM chats 
+                WHERE user_id = ? AND status != 'closed'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            
+            if row:
+                columns = [description[0] for description in cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при получении чата: {e}")
+            return None
+        finally:
+            await self.disconnect()
+
+    async def update_chat_status(self, chat_id: int, status: str) -> bool:
+        """Обновление статуса чата"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                UPDATE chats 
+                SET status = ?
+                WHERE id = ?
+                """,
+                (status, chat_id)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении статуса чата: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def accept_chat(self, chat_id: int) -> bool:
+        """Принятие чата менеджером"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                UPDATE chats 
+                SET status = 'active', accepted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (chat_id,)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при принятии чата: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def get_pending_chats(self) -> List[Dict]:
+        """Получение списка ожидающих чатов"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT c.*, u.first_name, u.last_name, u.username
+                FROM chats c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE c.status = 'pending'
+                """
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            
+            if rows:
+                columns = [description[0] for description in cursor.description]
+                return [dict(zip(columns, row)) for row in rows]
+            return []
+        except Exception as e:
+            logger.error(f"Ошибка при получении ожидающих чатов: {e}")
+            return []
+        finally:
+            await self.disconnect()
+
+    async def get_active_chat(self, user_id: int) -> Optional[Dict]:
+        """Получение активного чата пользователя"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT * FROM chats 
+                WHERE user_id = ? AND status = 'active'
+                """,
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            
+            if row:
+                columns = [description[0] for description in cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при получении чата: {e}")
+            return None
+        finally:
+            await self.disconnect()
+
+    async def save_message(self, chat_id: int, sender_id: int, message_text: str) -> bool:
+        """Сохранение сообщения в чате"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                INSERT INTO messages (chat_id, sender_id, message_text)
+                VALUES (?, ?, ?)
+                """,
+                (chat_id, sender_id, message_text)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении сообщения: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def close_chat(self, chat_id: int) -> bool:
+        """Закрытие чата"""
+        try:
+            await self.connect()
+            await self.connection.execute(
+                """
+                UPDATE chats 
+                SET status = 'closed', closed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (chat_id,)
+            )
+            await self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при закрытии чата: {e}")
+            return False
+        finally:
+            await self.disconnect()
+
+    async def get_chat_by_id(self, chat_id: int) -> dict:
+        """Получение информации о чате по ID чата"""
+        try:
+            await self.connect()
+            query = """
+                SELECT c.*, u.first_name, u.last_name, u.username
+                FROM chats c
+                LEFT JOIN users u ON c.user_id = u.user_id
+                WHERE c.id = ?
+            """
+            cursor = await self.connection.execute(query, (chat_id,))
+            row = await cursor.fetchone()
+            await cursor.close()
+            
+            if row:
+                columns = [description[0] for description in cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при получении чата по ID: {e}")
+            return None
+        finally:
+            await self.disconnect()
+
+    async def get_active_chat_by_manager(self, manager_id: int) -> Optional[Dict]:
+        """Получение активного чата по ID менеджера"""
+        try:
+            await self.connect()
+            cursor = await self.connection.execute(
+                """
+                SELECT c.*, u.first_name, u.last_name, u.username
+                FROM chats c
+                LEFT JOIN users u ON c.user_id = u.user_id
+                WHERE c.manager_id = ? AND c.status = 'active'
+                ORDER BY c.created_at DESC
+                LIMIT 1
+                """,
+                (manager_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            
+            if row:
+                columns = [description[0] for description in cursor.description]
+                return dict(zip(columns, row))
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при получении активного чата менеджера: {e}")
+            return None
         finally:
             await self.disconnect() 
